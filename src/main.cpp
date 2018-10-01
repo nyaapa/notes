@@ -1,10 +1,12 @@
 #include <iostream>
 #include <string>
+#include <iomanip>
 
 #include "json.hpp"
 #include "cxxopts.hpp"
 
 #include "curl/curl.h"
+#include "sqlite3.h"
 
 using json = nlohmann::json;
 using namespace std::string_literals;
@@ -13,7 +15,7 @@ struct message {
 	const ulong update_id;
 	const ulong chat_id;
 	const std::string_view username;
-	const std::string_view text;
+	const std::string_view note;
 };
 
 class tcurl {
@@ -28,11 +30,10 @@ class tcurl {
 public:
 	static constexpr auto api_host = "api.telegram.org";
 
-	explicit tcurl(std::string_view bot_key) noexcept : bot_key{bot_key}, base_address{"https://"s + api_host + "/bot"s + this->bot_key + "/"s}  {
+	explicit tcurl(std::string_view bot_key) : bot_key{bot_key}, base_address{"https://"s + api_host + "/bot"s + this->bot_key + "/"s}  {
 		this->curl = curl_easy_init();
 		if (!this->curl) {
-			std::cerr << "CURL initialization failed" << std::endl;
-			std::terminate();
+			throw std::runtime_error("CURL initialization failed");
 		}
 	}
 	
@@ -81,23 +82,160 @@ public:
 				.update_id = update["update_id"].get<ulong>(),
 				.chat_id = msg["chat"]["id"].get<ulong>(),
 				.username = msg["from"]["username"].get<std::string_view>(),
-				.text = msg["text"].get<std::string_view>()
+				.note = msg["text"].get<std::string_view>()
 			});
 		}
 	}
 };
 
+class sqlite {
+	sqlite3 *dbh;
+
+	void create_user(std::string_view username) {
+		std::string_view insert = R"(insert or ignore into users (name) values (?))";
+
+		sqlite3_stmt *stmt{nullptr};
+		if (auto res = sqlite3_prepare(this->dbh, insert.data(), insert.length(), &stmt, nullptr)) {
+			throw std::runtime_error("SQL prepare error("s + std::to_string(res) + ")");
+		}
+
+		if (auto res = sqlite3_bind_text(stmt, 1, username.data(), -1, SQLITE_STATIC)) {
+			throw std::runtime_error("SQL bind error("s + std::to_string(res) + ") of "s + username.data());
+		}
+
+		auto res = sqlite3_step(stmt);
+		while (res == SQLITE_ROW) {
+			res = sqlite3_step(stmt);
+		}
+
+		sqlite3_finalize(stmt);	
+		if (res != SQLITE_DONE) {
+			throw std::runtime_error("SQL step error("s + std::to_string(res) + ") for "s + username.data());
+		}
+	}
+
+public:
+	explicit sqlite() : dbh{nullptr} {
+		if (sqlite3_open("notes.db", &(this->dbh))) {
+			throw std::runtime_error("Can't open database: "s + sqlite3_errmsg(this->dbh));
+		}
+
+		std::cout << "Opened database successfully\n";
+	}
+
+	long get_user_id(std::string_view username) {
+		std::string_view select = R"(select user_id from users where name = ?)";
+
+		sqlite3_stmt *stmt{nullptr};
+		if (auto res = sqlite3_prepare(this->dbh, select.data(), select.length(), &stmt, nullptr)) {
+			throw std::runtime_error("SQL prepare error("s + std::to_string(res) + ")");
+		}
+
+		if (auto res = sqlite3_bind_text(stmt, 1, username.data(), -1, SQLITE_STATIC)) {
+			throw std::runtime_error("SQL bind error("s + std::to_string(res) + ") of "s + username.data());
+		}
+
+		auto res = sqlite3_step(stmt);	
+
+		if (res == SQLITE_ROW) {
+			auto res = sqlite3_column_int64(stmt, 0);
+			sqlite3_finalize(stmt);
+			return res;
+		} else if (res == SQLITE_DONE) {
+			sqlite3_finalize(stmt);
+			this->create_user(username);
+			return get_user_id(username);
+		} else {
+			sqlite3_finalize(stmt);
+			throw std::runtime_error("SQL step error("s + std::to_string(res) + ") for "s + username.data());
+		}
+	}
+
+	long add_note(std::string_view username, std::string_view note) {
+		auto id = get_user_id(username);
+		std::string insert = "insert into notes (user_id, note) values ("s + std::to_string(id) + ", ?)";
+
+		sqlite3_stmt *stmt{nullptr};
+		if (auto res = sqlite3_prepare(this->dbh, insert.data(), insert.length(), &stmt, nullptr)) {
+			throw std::runtime_error("SQL prepare error("s + std::to_string(res) + ")");
+		}
+
+		if (auto res = sqlite3_bind_text(stmt, 1, note.data(), -1, SQLITE_STATIC)) {
+			throw std::runtime_error("SQL bind error("s + std::to_string(res) + ") of "s + note.data());
+		}
+
+		auto res = sqlite3_step(stmt);
+		while (res == SQLITE_ROW) {
+			res = sqlite3_step(stmt);
+		}
+
+		sqlite3_finalize(stmt);	
+		if (res != SQLITE_DONE) {
+			throw std::runtime_error("SQL step error("s + std::to_string(res) + ") for "s + note.data());
+		}
+	}
+
+	void init() {
+		auto notes = R"(
+			create table if not exists notes (
+				note_id integer primary key autoincrement,
+				user_id int not null,
+				note text not null
+			)
+		)";
+
+		char *err{nullptr};
+
+		if (sqlite3_exec(this->dbh, notes, nullptr, nullptr, &err)) {
+			auto error = "SQL error: "s +  err;
+			sqlite3_free(err);
+			throw std::runtime_error(error);
+		}
+
+		auto notes_idx = R"(create index if not exists notes_user_id_idx ON notes (user_id))";
+
+		if (sqlite3_exec(this->dbh, notes_idx, nullptr, nullptr, &err)) {
+			auto error = "SQL error: "s +  err;
+			sqlite3_free(err);
+			throw std::runtime_error(error);
+		}
+		
+		std::cout << "notes are in place\n";
+
+		auto users = R"(
+			create table if not exists users (
+				user_id integer primary key autoincrement,
+				name nvarchar(60) unique not null
+			)
+		)";
+
+		if (sqlite3_exec(this->dbh, users, nullptr, nullptr, &err)) {
+			auto error = "SQL error: "s +  err;
+			sqlite3_free(err);
+			throw std::runtime_error(error);
+		}
+
+		std::cout << "users are in place\n";
+	}
+
+	~sqlite() {
+		sqlite3_close(this->dbh);
+	}
+};
+
 int main(int argc, char** argv) {
 	try {
-	    cxxopts::Options options("notes", "Notes telegram bot");
+		cxxopts::Options options("notes", "Notes telegram bot");
 
 		std::string bot_key;
 		ulong update_id{0};
+		bool init;
 
 		options
 			.add_options()
 			("b,bot", "bot key", cxxopts::value<std::string>(bot_key))
 			("u,update-id", "starting update id", cxxopts::value<ulong>(update_id))
+			("i,init", "initialize db", cxxopts::value<bool>(init))
 			("help", "Print help")
 			;
 
@@ -108,10 +246,21 @@ int main(int argc, char** argv) {
 			exit(0);
 		}
 
+		sqlite dbh{};
+		if (init) {
+			dbh.init();
+		}
+
 		tcurl th{bot_key};
 		th.request("getMe");
-		th.process_updates(update_id, [](message const& msg) {
-			std::cout << "[" << msg.update_id << "] " << msg.username << " via " <<  msg.chat_id << ": " << msg.text << "\n";
+		th.process_updates(update_id, [&dbh](message const& msg) {
+			// TODO: not every command
+			// TODO: return notes
+			// TODO: return note id
+			// TODO: date + type?
+			// TODO: store update id & skip it?
+			dbh.add_note(msg.username, msg.note);
+			std::cout << "[" << msg.update_id << "] " << msg.username << " via " <<  msg.chat_id << ": " << msg.note << "\n";
 		});
 	} catch (std::exception& e) {
 		std::cerr << "Unexpected exception: " << e.what() << std::endl;

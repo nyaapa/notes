@@ -10,6 +10,7 @@
 
 using json = nlohmann::json;
 using namespace std::string_literals;
+using namespace std::literals;
 
 struct message {
 	const ulong update_id;
@@ -72,18 +73,31 @@ public:
 	}
 
 	template<typename T>
-	void process_updates(ulong starting_from, T process) const {
+	long process_updates(ulong starting_from, T process) const {
 		auto updates = this->request("getUpdates?offset=" + std::to_string(starting_from));
 
 		for (auto& update : updates) {
 			auto& msg = update["message"];
 
+			auto update_id = update["update_id"].get<ulong>();
 			process(message {
-				.update_id = update["update_id"].get<ulong>(),
+				.update_id = update_id,
 				.chat_id = msg["chat"]["id"].get<ulong>(),
 				.username = msg["from"]["username"].get<std::string_view>(),
 				.note = msg["text"].get<std::string_view>()
 			});
+
+			starting_from = std::max(starting_from, update_id);
+		}
+
+		return starting_from;
+	}
+
+	void response(message const& msg, std::string_view text) const {
+		if (auto encoded_text = curl_easy_escape(this->curl, text.data(), text.length())) {
+			auto request = "sendMessage?chat_id=" + std::to_string(msg.chat_id) + "&text=" + encoded_text;
+			curl_free(encoded_text); // guard it?
+			this->request(request);
 		}
 	}
 };
@@ -173,6 +187,8 @@ public:
 		if (res != SQLITE_DONE) {
 			throw std::runtime_error("SQL step error("s + std::to_string(res) + ") for "s + note.data());
 		}
+
+		return sqlite3_last_insert_rowid(this->dbh);
 	}
 
 	void init() {
@@ -218,6 +234,14 @@ public:
 		std::cout << "users are in place\n";
 	}
 
+	ulong get_last_update_id() const {
+
+	}
+
+	void set_last_update_id(ulong update_id) const {
+		
+	}
+
 	~sqlite() {
 		sqlite3_close(this->dbh);
 	}
@@ -251,17 +275,28 @@ int main(int argc, char** argv) {
 			dbh.init();
 		}
 
+		if (!update_id) {
+			update_id = dbh.get_last_update_id();
+		}
+
 		tcurl th{bot_key};
 		th.request("getMe");
-		th.process_updates(update_id, [&dbh](message const& msg) {
+		update_id = th.process_updates(update_id, [&dbh, &th](message const& msg) {
+			std::cout << "[" << msg.update_id << "] " << msg.username << " via " <<  msg.chat_id << ": " << msg.note << "\n";
+			if (msg.note.substr(0, "/add "sv.length()) == "/add ") {
+				auto id = dbh.add_note(msg.username, msg.note.substr("/add "sv.length()));
+				th.response(msg, std::to_string(id));
+			} else {
+				th.response(msg, "Can't parse the request");
+			}
 			// TODO: not every command
 			// TODO: return notes
 			// TODO: return note id
 			// TODO: date + type?
 			// TODO: store update id & skip it?
-			dbh.add_note(msg.username, msg.note);
-			std::cout << "[" << msg.update_id << "] " << msg.username << " via " <<  msg.chat_id << ": " << msg.note << "\n";
 		});
+
+		dbh.set_last_update_id(update_id);
 	} catch (std::exception& e) {
 		std::cerr << "Unexpected exception: " << e.what() << std::endl;
 	} catch (...) {

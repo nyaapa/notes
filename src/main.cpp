@@ -37,11 +37,11 @@ public:
 			throw std::runtime_error("CURL initialization failed");
 		}
 	}
-	
+
 	~tcurl() {
 		curl_easy_cleanup(this->curl);
 	}
-	
+
 	tcurl(const tcurl&) = delete;
 	tcurl(tcurl&&) = delete;
 
@@ -50,7 +50,7 @@ public:
 
 	json request(std::string_view const method) const {
 		std::string buffer;
-		
+
 		std::string uri = base_address + method.data();
 		curl_easy_setopt(this->curl, CURLOPT_URL, uri.c_str());
 		curl_easy_setopt(this->curl, CURLOPT_WRITEDATA, &buffer);
@@ -66,7 +66,7 @@ public:
 		if (!response["ok"].get<bool>()) {
 			throw std::runtime_error("Request finished unsuccessfully");
 		}
-	
+
 		json result;
 		response["result"].swap(result);
 		return result;
@@ -74,7 +74,7 @@ public:
 
 	template<typename T>
 	long process_updates(ulong starting_from, T process) const {
-		auto updates = this->request("getUpdates?offset=" + std::to_string(starting_from));
+		auto updates = this->request("getUpdates?offset=" + std::to_string(starting_from + 1));
 
 		for (auto& update : updates) {
 			auto& msg = update["message"];
@@ -122,7 +122,7 @@ class sqlite {
 			res = sqlite3_step(stmt);
 		}
 
-		sqlite3_finalize(stmt);	
+		sqlite3_finalize(stmt);
 		if (res != SQLITE_DONE) {
 			throw std::runtime_error("SQL step error("s + std::to_string(res) + ") for "s + username.data());
 		}
@@ -149,7 +149,7 @@ public:
 			throw std::runtime_error("SQL bind error("s + std::to_string(res) + ") of "s + username.data());
 		}
 
-		auto res = sqlite3_step(stmt);	
+		auto res = sqlite3_step(stmt);
 
 		if (res == SQLITE_ROW) {
 			auto res = sqlite3_column_int64(stmt, 0);
@@ -183,7 +183,7 @@ public:
 			res = sqlite3_step(stmt);
 		}
 
-		sqlite3_finalize(stmt);	
+		sqlite3_finalize(stmt);
 		if (res != SQLITE_DONE) {
 			throw std::runtime_error("SQL step error("s + std::to_string(res) + ") for "s + note.data());
 		}
@@ -215,7 +215,7 @@ public:
 			sqlite3_free(err);
 			throw std::runtime_error(error);
 		}
-		
+
 		std::cout << "notes are in place\n";
 
 		auto users = R"(
@@ -232,14 +232,60 @@ public:
 		}
 
 		std::cout << "users are in place\n";
+
+		auto state = R"(
+			create table if not exists state (
+				_unique integer primary key not null default 0,
+				update_id integer
+			)
+		)";
+
+		if (sqlite3_exec(this->dbh, state, nullptr, nullptr, &err)) {
+			auto error = "SQL error: "s +  err;
+			sqlite3_free(err);
+			throw std::runtime_error(error);
+		}
+
+		auto init_state = R"(insert or ignore into state (update_id) values (0))";
+
+		if (sqlite3_exec(this->dbh, init_state, nullptr, nullptr, &err)) {
+			auto error = "SQL error: "s +  err;
+			sqlite3_free(err);
+			throw std::runtime_error(error);
+		}
+
+		std::cout << "state is in place\n";
 	}
 
 	ulong get_last_update_id() const {
+		std::string_view select = R"(select update_id from state)";
 
+		sqlite3_stmt *stmt{nullptr};
+		if (auto res = sqlite3_prepare(this->dbh, select.data(), select.length(), &stmt, nullptr)) {
+			throw std::runtime_error("SQL prepare error("s + std::to_string(res) + ")");
+		}
+
+		auto res = sqlite3_step(stmt);
+
+		if (res == SQLITE_ROW) {
+			auto res = sqlite3_column_int64(stmt, 0);
+			sqlite3_finalize(stmt);
+			return res;
+		} else {
+			sqlite3_finalize(stmt);
+			throw std::runtime_error("SQL step error("s + std::to_string(res) + ") for state init");
+		}
 	}
 
 	void set_last_update_id(ulong update_id) const {
-		
+		auto update_state = "update state set update_id = " + std::to_string(update_id);
+
+		char *err{nullptr};
+		if (sqlite3_exec(this->dbh, update_state.data(), nullptr, nullptr, &err)) {
+			auto error = "SQL error: "s +  err;
+			sqlite3_free(err);
+			throw std::runtime_error(error);
+		}
 	}
 
 	~sqlite() {
@@ -275,8 +321,10 @@ int main(int argc, char** argv) {
 			dbh.init();
 		}
 
-		if (!update_id) {
+		if (!result.count("update-id")) {
 			update_id = dbh.get_last_update_id();
+		} else {
+			--update_id; // process_updates is excluding 
 		}
 
 		tcurl th{bot_key};

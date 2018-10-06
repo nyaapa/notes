@@ -1,6 +1,8 @@
 #include <iostream>
 #include <string>
 #include <iomanip>
+#include <charconv>
+#include <optional>
 
 #include "json.hpp"
 #include "cxxopts.hpp"
@@ -107,7 +109,7 @@ public:
 class sqlite {
 	sqlite3 *dbh;
 
-	void create_user(std::string_view username) {
+	void create_user(std::string_view username) const {
 		std::string_view insert = R"(insert or ignore into users (name) values (?))";
 
 		sqlite3_stmt *stmt{nullptr};
@@ -139,7 +141,7 @@ public:
 		std::cout << "Opened database successfully\n";
 	}
 
-	long get_user_id(std::string_view username) {
+	long get_user_id(std::string_view username) const {
 		std::string_view select = R"(select user_id from users where name = ?)";
 
 		sqlite3_stmt *stmt{nullptr};
@@ -160,15 +162,15 @@ public:
 		} else if (res == SQLITE_DONE) {
 			sqlite3_finalize(stmt);
 			this->create_user(username);
-			return get_user_id(username);
+			return this->get_user_id(username);
 		} else {
 			sqlite3_finalize(stmt);
 			throw std::runtime_error("SQL step error("s + std::to_string(res) + ") for "s + username.data());
 		}
 	}
 
-	long add_note(std::string_view username, std::string_view note) {
-		auto id = get_user_id(username);
+	long add_note(std::string_view username, std::string_view note) const {
+		auto id = this->get_user_id(username);
 		std::string insert = "insert into notes (user_id, note) values ("s + std::to_string(id) + ", ?)";
 
 		sqlite3_stmt *stmt{nullptr};
@@ -191,6 +193,38 @@ public:
 		}
 
 		return sqlite3_last_insert_rowid(this->dbh);
+	}
+
+	std::optional<std::string> get_note(std::string_view username, ulong note_id) const {
+		auto user_id = this->get_user_id(username);
+		auto select = R"(
+			select
+				note
+			from
+				notes
+			where
+				note_id = )" + std::to_string(note_id) + R"(
+			and
+				user_id = )" + std::to_string(user_id);
+
+		sqlite3_stmt *stmt{nullptr};
+		if (auto res = sqlite3_prepare(this->dbh, select.data(), select.length(), &stmt, nullptr)) {
+			throw std::runtime_error("SQL prepare error("s + std::to_string(res) + ")");
+		}
+
+		auto res = sqlite3_step(stmt);
+
+		if (res == SQLITE_ROW) {
+			std::string res{reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0))}; // remove unsigned
+			sqlite3_finalize(stmt);
+			return res;
+		} else if (res == SQLITE_DONE) {
+			sqlite3_finalize(stmt);
+			return {};
+		} else {
+			sqlite3_finalize(stmt);
+			throw std::runtime_error("SQL step error("s + std::to_string(res) + ") for state init");
+		}
 	}
 
 	void init() {
@@ -335,15 +369,19 @@ int main(int argc, char** argv) {
 			std::cout << "[" << msg.update_id << "] " << msg.username << " via " <<  msg.chat_id << ": " << msg.note << "\n";
 			if (msg.note.substr(0, "/add "sv.length()) == "/add ") {
 				auto id = dbh.add_note(msg.username, msg.note.substr("/add "sv.length()));
-				th.reply(msg, std::to_string(id));
+				th.reply(msg, "Added #" + std::to_string(id));
+			} else if (msg.note.substr(0, "/get "sv.length()) == "/get ") {
+				ulong note_id = std::stoul(msg.note.substr("/get "sv.length()).data()); // std::from_chars -> charconv:410: undefined reference to `__muloti4'
+				if (auto note = dbh.get_note(msg.username, note_id)) {
+					th.reply(msg, *note);
+				} else {
+					th.reply(msg, "No such message");
+				}
 			} else {
 				th.reply(msg, "Can't parse the request");
 			}
-			// TODO: not every command
-			// TODO: return notes
-			// TODO: return note id
 			// TODO: date + type?
-			// TODO: store update id & skip it?
+			// TODO: delete notes
 		});
 
 		dbh.set_last_update_id(update_id);

@@ -15,6 +15,7 @@ using namespace std::literals;
 struct message {
 	const ulong update_id;
 	const ulong chat_id;
+	const ulong message_id;
 	const std::string_view username;
 	const std::string_view note;
 };
@@ -83,6 +84,7 @@ public:
 			process(message {
 				.update_id = update_id,
 				.chat_id = msg["chat"]["id"].get<ulong>(),
+				.message_id = msg["message_id"].get<ulong>(),
 				.username = msg["from"]["username"].get<std::string_view>(),
 				.note = msg["text"].get<std::string_view>()
 			});
@@ -93,9 +95,9 @@ public:
 		return starting_from;
 	}
 
-	void response(message const& msg, std::string_view text) const {
+	void reply(message const& msg, std::string_view text) const {
 		if (auto encoded_text = curl_easy_escape(this->curl, text.data(), text.length())) {
-			auto request = "sendMessage?chat_id=" + std::to_string(msg.chat_id) + "&text=" + encoded_text;
+			auto request = "sendMessage?chat_id=" + std::to_string(msg.chat_id) + "&reply_to_message_id=" + std::to_string(msg.message_id) + "&text=" + encoded_text;
 			curl_free(encoded_text); // guard it?
 			this->request(request);
 		}
@@ -333,9 +335,9 @@ int main(int argc, char** argv) {
 			std::cout << "[" << msg.update_id << "] " << msg.username << " via " <<  msg.chat_id << ": " << msg.note << "\n";
 			if (msg.note.substr(0, "/add "sv.length()) == "/add ") {
 				auto id = dbh.add_note(msg.username, msg.note.substr("/add "sv.length()));
-				th.response(msg, std::to_string(id));
+				th.reply(msg, std::to_string(id));
 			} else {
-				th.response(msg, "Can't parse the request");
+				th.reply(msg, "Can't parse the request");
 			}
 			// TODO: not every command
 			// TODO: return notes

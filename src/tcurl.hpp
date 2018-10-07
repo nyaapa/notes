@@ -78,16 +78,16 @@ public:
 		auto updates = this->request("getUpdates?offset=" + std::to_string(starting_from + 1));
 
 		for (auto& update : updates) {
-			auto& msg = update["message"];
-
 			auto update_id = update["update_id"].get<ulong>();
-			process(message {
-				.update_id = update_id,
-				.chat_id = msg["chat"]["id"].get<ulong>(),
-				.message_id = msg["message_id"].get<ulong>(),
-				.username = msg["from"]["username"].get<std::string_view>(),
-				.note = msg["text"].get<std::string_view>()
-			});
+			if (auto& msg = update["message"]; !msg.is_null()) {
+				process(message {
+					.update_id = update_id,
+					.chat_id = msg["chat"]["id"].get<ulong>(),
+					.message_id = msg["message_id"].get<ulong>(),
+					.username = msg["from"]["username"].get<std::string_view>(),
+					.note = msg["text"].get<std::string_view>()
+				});
+			}
 
 			starting_from = std::max(starting_from, update_id);
 		}

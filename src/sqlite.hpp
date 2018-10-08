@@ -6,6 +6,7 @@
 
 #include "sqlite3.h"
 
+// TODO: move inside?
 using namespace std::string_literals;
 using namespace std::literals;
 

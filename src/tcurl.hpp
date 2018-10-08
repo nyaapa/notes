@@ -9,6 +9,7 @@
 
 #include "json.hpp"
 
+// TODO: move inside?
 using json = nlohmann::json;
 using namespace std::string_literals;
 
@@ -17,7 +18,7 @@ struct message {
 	const ulong chat_id;
 	const ulong message_id;
 	const std::string_view username;
-	const std::string_view note;
+	const std::string_view text;
 };
 
 class tcurl {
@@ -85,7 +86,7 @@ public:
 					.chat_id = msg["chat"]["id"].get<ulong>(),
 					.message_id = msg["message_id"].get<ulong>(),
 					.username = msg["from"]["username"].get<std::string_view>(),
-					.note = msg["text"].get<std::string_view>()
+					.text = msg["text"].get<std::string_view>()
 				});
 			}
 
@@ -98,7 +99,7 @@ public:
 	void reply(message const& msg, std::string_view text) const {
 		if (auto encoded_text = curl_easy_escape(this->curl, text.data(), text.length())) {
 			auto request = "sendMessage?chat_id=" + std::to_string(msg.chat_id) + "&reply_to_message_id=" + std::to_string(msg.message_id) + "&text=" + encoded_text;
-			curl_free(encoded_text); // guard it?
+			curl_free(encoded_text); // TODO: guard it?
 			this->request(request);
 		}
 	}

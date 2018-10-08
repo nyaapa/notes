@@ -1,16 +1,12 @@
 #include <iostream>
 #include <string>
-#include <iomanip>
-#include <charconv>
-#include <optional>
+#include <exception>
 
 #include "cxxopts.hpp"
 
 #include "tcurl.hpp"
 #include "sqlite.hpp"
-
-using namespace std::string_literals;
-using namespace std::literals;
+#include "lexer.hpp"
 
 int main(int argc, char** argv) {
 	try {
@@ -49,20 +45,8 @@ int main(int argc, char** argv) {
 		tcurl th{bot_key};
 		th.request("getMe");
 		update_id = th.process_updates(update_id, [&dbh, &th](message const& msg) {
-			std::cout << "[" << msg.update_id << "] " << msg.username << " via " <<  msg.chat_id << ": " << msg.note << "\n";
-			if (msg.note.substr(0, "/add "sv.length()) == "/add ") {
-				auto id = dbh.add_note(msg.username, msg.note.substr("/add "sv.length()));
-				th.reply(msg, "Added #" + std::to_string(id));
-			} else if (msg.note.substr(0, "/get "sv.length()) == "/get ") {
-				ulong note_id = std::stoul(msg.note.substr("/get "sv.length()).data()); // std::from_chars -> charconv:410: undefined reference to `__muloti4'
-				if (auto note = dbh.get_note(msg.username, note_id)) {
-					th.reply(msg, *note);
-				} else {
-					th.reply(msg, "No such message");
-				}
-			} else {
-				th.reply(msg, "Can't parse the request");
-			}
+			std::cout << "[" << msg.update_id << "] " << msg.username << " via " <<  msg.chat_id << ": " << msg.text << "\n";
+			lexer{}.parse(msg)->process(th, dbh);
 			// TODO: date + type?
 			// TODO: delete notes
 		});

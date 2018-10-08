@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <string>
+#include <string_view>
 
 #include "curl/curl.h"
 
@@ -44,10 +45,10 @@ public:
 		curl_easy_cleanup(this->curl);
 	}
 
-	tcurl(const tcurl&) = delete;
+	tcurl(tcurl const&) = delete;
 	tcurl(tcurl&&) = delete;
 
-	tcurl& operator=(const tcurl&) = delete;
+	tcurl& operator=(tcurl const&) = delete;
 	tcurl& operator=(tcurl&&) = delete;
 
 	json request(std::string_view const method) const {

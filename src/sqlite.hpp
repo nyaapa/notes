@@ -3,6 +3,7 @@
 #include <iostream>
 #include <string>
 #include <optional>
+#include <string_view>
 
 #include "sqlite3.h"
 
@@ -44,6 +45,16 @@ public:
 
 		std::cout << "Opened database successfully\n";
 	}
+
+	~sqlite() {
+		sqlite3_close(this->dbh);
+	}
+
+	sqlite(sqlite const&) = delete;
+	sqlite(sqlite&&) = delete;
+
+	sqlite& operator=(sqlite const&) = delete;
+	sqlite& operator=(sqlite&&) = delete;
 
 	long get_user_id(std::string_view username) const {
 		std::string_view select = R"(select user_id from users where name = ?)";
@@ -119,7 +130,7 @@ public:
 		auto res = sqlite3_step(stmt);
 
 		if (res == SQLITE_ROW) {
-			std::string res{reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0))}; // remove unsigned
+			std::string res{reinterpret_cast<char const*>(sqlite3_column_text(stmt, 0))}; // remove unsigned
 			sqlite3_finalize(stmt);
 			return res;
 		} else if (res == SQLITE_DONE) {
@@ -226,9 +237,5 @@ public:
 			sqlite3_free(err);
 			throw std::runtime_error(error);
 		}
-	}
-
-	~sqlite() {
-		sqlite3_close(this->dbh);
 	}
 };

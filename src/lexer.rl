@@ -15,7 +15,7 @@ std::stringstream strbuf;
 
 	get_by_id := |*
 		[0-9]+ => {
-			auto id = std::stoi(std::string(ts, te)); // std::from_chars -> charconv:410: undefined reference to `__muloti4'
+			auto id = std::stoul(std::string(ts, te)); // std::from_chars -> charconv:410: undefined reference to `__muloti4'
 			result = std::make_unique<get>(msg, id);
 			fnext main;
 		};

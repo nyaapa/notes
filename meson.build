@@ -11,3 +11,5 @@ add_global_arguments(['-Wall', '-Wextra'], language: 'cpp')
 inc = include_directories('include')
 
 subdir('src')
+
+subdir('t')

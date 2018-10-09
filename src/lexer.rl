@@ -25,10 +25,8 @@ std::stringstream strbuf;
 
 	add_note := |*
 		any+ => {
-			strbuf << std::string(ts, te);
-
 			if (te == eof) {
-				result = std::make_unique<add>(msg, std::string(strbuf.str()));
+				result = std::make_unique<add>(msg, std::string(ts, te));
 				fnext main;
 			}
 		};

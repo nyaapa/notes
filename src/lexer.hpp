@@ -19,6 +19,7 @@ public:
 	command& operator=(command&&) = delete;
 
 	virtual void process(tcurl const&, sqlite const&) = 0;
+	virtual std::string to_string() = 0;
 };
 
 class get : public command {
@@ -38,9 +39,14 @@ public:
 			th.reply(msg, "No such message");
 		}
 	}
+
+	virtual std::string to_string() override {
+		return "get=" + std::to_string(note_id);
+	}
 };
 
 struct add : public command {
+protected:
 	std::string text;
 public:
 	add(message const& msg, std::string text) : command{msg}, text{text} {}
@@ -54,9 +60,14 @@ public:
 		auto id = dbh.add_note(msg.username, text);
 		th.reply(msg, "Added #" + std::to_string(id));
 	}
+
+	virtual std::string to_string() override {
+		return "add=" + text;
+	}
 };
 
 struct like : public command {
+protected:
 	std::string pattern;
 public:
 	like(message const& msg, std::string pattern) : command{msg}, pattern{pattern} {}
@@ -75,6 +86,10 @@ public:
 			th.reply(msg, "No such message");
 		}
 	}
+
+	virtual std::string to_string() override {
+		return "like=" + pattern;
+	}
 };
 
 struct error : public command {
@@ -88,6 +103,10 @@ public:
 
 	virtual void process(tcurl const& th, sqlite const&) override {
 		th.reply(msg, "Can't parse the request");
+	}
+
+	virtual std::string to_string() override {
+		return "error";
 	}
 };
 

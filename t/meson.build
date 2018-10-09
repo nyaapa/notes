@@ -15,9 +15,9 @@ ragel_src = ragel_gen.process('../src/lexer.rl')
 src_dir = include_directories('../src')
 
 e = executable(
-    'gtest', 
-    'test.cpp',
-    ragel_src,
-    dependencies : [gtest, gmock, lcurl, lsqlite],
-    include_directories : [inc, src_dir])
+	'gtest', 
+	'test.cpp',
+	ragel_src,
+	dependencies : [gtest, gmock, lcurl, lsqlite],
+	include_directories : [inc, src_dir])
 test('gtest', e)
